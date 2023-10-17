@@ -1,0 +1,431 @@
+---
+title: "Cleaning Zimbabwe Election Data"
+output: html_notebook
+editor_options: 
+  chunk_output_type: inline
+---
+
+
+
+```{r}
+library(tidyverse)
+library(readxl)
+library(janitor)
+library(gglabeller)
+library(ggrepel)
+library(ggthemes)
+#library(ggiraph)
+#library(patchwork)
+```
+
+```{r}
+raw_data<-
+  list.files(path="Raw_data/",full.names = T) %>% 
+  as_tibble() %>% 
+  rename(file_name=value) %>% 
+  mutate(skips=c(2,2,1,2,2,2,2,2,1,2)) %>% 
+  mutate(file=map2(file_name,skips,function(a,b){read_excel(a,skip=b)})) %>% 
+  mutate(file=map(file,clean_names)) %>% 
+  mutate(file=map(file,filter,
+                  if_else(is.na(district) | is.na(local_authority),F,T)
+                  )) %>% 
+  #mutate(colnames=map(file,colnames)) %>% 
+  #unnest(colnames) %>% 
+  #group_by(colnames) %>% 
+  #summarise(n=n()) %>% 
+  
+  #unnest() %>% 
+  mutate(file=map(file,
+                  function(df){df %>% set_names(~sub('polling_code', 'polling_station_code', .x))}
+                  )) %>% 
+  mutate(file=map(file,
+                  function(df){df %>% set_names(~sub('polling_stations', 'polling_station_name', .x))}
+                  )) %>% 
+  #mutate(file=map(file,
+  #                function(df){df %>% set_names(~sub('polling_stations', 'polling_station_name', .x))}
+  #                )) %>% 
+  mutate(file=map(file,
+                  function(df){df %>% set_names(~sub('station_code', 'polling_station_code', .x))}
+                  )) %>% 
+  mutate(file=map(file,
+                  function(df){df %>% set_names(~sub('polling_polling_station_code', 'polling_station_code', .x))}
+                  )) %>% 
+  mutate(file=map(file,
+                  function(df){df %>% set_names(~sub('facility', 'polling_station_code', .x))}
+                  )) %>% 
+  
+  mutate(file=map(file,gather,
+         -district,
+         -constituency,
+         -local_authority,
+         -ward_no,
+         -polling_station_name,
+         -polling_station_code,
+         -total_votes_rejected,
+         -ballot_paper_unaccounted_for,
+         -total_votes_cast,
+         -total_valid_votes_cast,
+        key="candidate",
+        value="votes"
+         )) %>% 
+  
+  mutate(file=map(file,function(df){df %>% mutate(total_votes_rejected=as.character(total_votes_rejected))})) %>% 
+  mutate(file=map(file,
+                  function(df){df %>%
+                      mutate(ballot_paper_unaccounted_for=as.character(ballot_paper_unaccounted_for))})) %>% 
+  mutate(file=map(file,function(df){df %>% mutate(total_votes_cast=as.character(total_votes_cast))})) %>% 
+  mutate(file=map(file,function(df){df %>% mutate(total_valid_votes_cast=as.character(total_valid_votes_cast))})) %>%
+  mutate(file=map(file,function(df){df %>% mutate(votes=as.character(votes))})) %>%
+  mutate(file=map(file,function(df){df %>% mutate(ward_no=as.character(ward_no))})) %>%
+  
+  #mutate(file=map(file,function(df){df %>% mutate_at(is.numeric, as.character)})) %>% 
+  
+  unnest() %>% 
+  mutate(votes=as.numeric(votes)) %>% 
+  select(
+    -total_valid_votes_cast,
+    -total_votes_cast,
+    -ballot_paper_unaccounted_for,
+    -total_votes_rejected
+  ) %>% 
+  mutate(candidate = case_when(
+    str_detect(candidate,"busha_joseph") ~ "Joseph Busha",
+    str_detect(candidate,"chamisa_nelson") ~ "Nelson Chamisa",
+    str_detect(candidate,"hlabangana_kwanele") ~ "Kwanele Hlabangana",
+    str_detect(candidate,"kasiyamhuru_blessing") ~ "Blessing Kasiyamhuru",
+    str_detect(candidate,"khupe_thokozani") ~ "Thokozani Khupe",
+    str_detect(candidate,"madhuku_lovemore") ~ "Lovemore Madhuku",
+    str_detect(candidate,"mhambi_hove") ~ "Hove Mhambi",
+    str_detect(candidate,"mnangagwa_emmerson") ~ "Emmerson Mnangagwa",
+    str_detect(candidate,"wilson_") ~ "Harry Peter Wilson",
+    str_detect(candidate,"shumba_") ~ "Daniel Shumba",
+    str_detect(candidate,"gava_") ~ "Gava Mapfumo Peter",
+    str_detect(candidate,"chikanga_") ~ "Chikanga Everisto Washington",
+    str_detect(candidate,"dzapasi_") ~ "Melbah Dzapasi",
+    str_detect(candidate,"mangoma_") ~ "Elton Mangoma",
+    str_detect(candidate,"manyika_noah") ~ "Manyika Noah Ngoni",
+    str_detect(candidate,"manyika_noah") ~ "Manyika Noah Ngoni",
+    str_detect(candidate,"ambrose") ~ "Ambrose Mutinhiri",
+    str_detect(candidate,"mapfumo_chiguvare_tonderayi") ~ "Tonderai Mapfumo-Chiguvare",
+    str_detect(candidate,"mapfumo_chiguvare_tonderai") ~ "Tonderai Mapfumo-Chiguvare",
+    str_detect(candidate,"moyo_") ~ "Nkosana Donald Moyo",
+    str_detect(candidate,"mariyacha_violet") ~ "Violet Mariyacha",
+    str_detect(candidate,"mugadza_willard") ~ "Willard Mugadza",
+    str_detect(candidate,"mujuru_joice") ~ "Joice Mujuru",
+    str_detect(candidate,"munyanduri") ~ "Tenda Munyanduri",
+    str_detect(candidate,"mteki") ~ "Bryn Taurai Mteki",
+    TRUE ~ candidate
+  )) %>% 
+  mutate(council_type=case_when(
+    str_detect(local_authority,"Municipality") ~ "Municipality or \nTown Council",
+    str_detect(local_authority,"RDC") ~ "Rural District \nCouncil (RDC)",
+    str_detect(local_authority,"Town Council") ~ "Municipality or \nTown Council",
+    str_detect(local_authority,"Town council") ~ "Municipality or \nTown Council",
+    str_detect(local_authority,"Local Board") ~ "Local Board",
+    TRUE ~ "Other"         
+  )) %>% 
+  identity()
+
+#raw_data<-
+#  raw_data %>% 
+#  slice(10) %>% 
+#  select(file) %>% 
+#  unnest() %>% 
+#  select(5,6) %>% 
+#  identity()
+
+raw_data
+```
+
+```{r}
+dir_example<-
+  "Raw_data//BYOMetro.xlsx"
+
+read_excel(dir_example,skip = 3) %>% 
+  clean_names() %>% 
+  filter(!is.na(local_authority)) 
+```
+
+```{r}
+ raw_data %>% 
+  group_by(candidate) %>% 
+  summarise(votes=sum(votes,na.rm = T)) %>% 
+  mutate(lumped_candidates=fct_lump(candidate,n = 2,w = votes)) %>% 
+  mutate(votes=votes/sum(votes)) %>% 
+  ggplot(aes(x=lumped_candidates,y=votes)) +
+  geom_col()
+```
+
+```{r}
+ raw_data %>% 
+  group_by(candidate) %>% 
+  summarise(votes=sum(votes,na.rm = T)) %>% 
+  mutate(lumped_candidates=fct_lump(candidate,n = 2,w = votes)) %>% 
+  mutate(votes_percent=votes/sum(votes)) %>% 
+  group_by(lumped_candidates) %>% 
+  summarise(votes=sum(votes_percent))
+```
+
+
+```{r}
+raw_data %>% 
+  select(file_name,local_authority,council_type) %>% 
+  distinct() %>% 
+  arrange(local_authority)
+```
+
+```{r}
+raw_data %>% 
+  select(-skips) %>% 
+  group_by(file_name,
+           #polling_station_name,
+           candidate,
+           local_authority,
+           constituency,
+           #polling_station_code,
+           council_type) %>% 
+ # summarise(votes=sum(votes,na.rm = T)) %>% 
+#  group_by(file_name,
+           #polling_station_name,
+#           local_authority,
+#           constituency,
+#           #polling_station_code,
+#           council_type) %>% 
+  #mutate(votes_total=sum(votes,na.rm=T)) %>% 
+  summarise(
+    #votes_percent=votes/sum(votes,na.rm=T),
+    votes=sum(votes,na.rm=T)
+    ) %>% 
+  #ungroup() %>% 
+  #select(
+    ##polling_station_code,
+    #candidate,
+    #votes_percent,
+    #votes_total,
+    #local_authority,
+    ##polling_station_name,
+    #council_type
+    #) %>% 
+  #filter(candidate=="Emmerson Mnangagwa" | candidate=="Nelson Chamisa") %>% 
+  #spread(candidate,votes_percent) %>% 
+  #mutate(vote_percent_difference=`Emmerson Mnangagwa`- `Nelson Chamisa`) %>% 
+  #select(
+  #  polling_station_code,
+ #   polling_station_name,
+  #  council_type,
+  #  vote_percent_difference,
+ #   votes_total
+ # ) %>% 
+  identity() #%>% 
+  #ggplot(aes(x=vote_percent_difference,y=council_type,size=votes_total)) +
+  #geom_point()
+```
+
+```{r}
+local_authority_level_votes <-
+  raw_data %>% 
+  select(-skips) %>% 
+  mutate(file_name=str_remove(file_name,"Raw_data//")) %>% 
+  mutate(file_name=str_remove(file_name,".xlsx")) %>% 
+  group_by(candidate,local_authority,council_type,file_name) %>% 
+  summarise(votes=sum(votes,na.rm = T)) %>% 
+  group_by(local_authority,council_type,file_name) %>% 
+  mutate(total_votes=sum(votes,na.rm=T)) %>% 
+  filter(candidate=="Emmerson Mnangagwa" | candidate=="Nelson Chamisa") %>% 
+  mutate(votes_percentage=votes/total_votes) %>% 
+  select(-votes) %>% 
+  spread(candidate,votes_percentage) %>% 
+  mutate(vote_percent_difference=`Emmerson Mnangagwa`- `Nelson Chamisa`) %>% 
+  select(-`Emmerson Mnangagwa`, -`Nelson Chamisa`) 
+  
+local_authority_level_votes
+```
+
+```{r}
+clean_data<-
+  local_authority_level_votes %>% 
+  mutate(major_metropol=case_when(
+    str_detect(local_authority,"Bulawayo") ~ "Bulawayo",
+    str_detect(local_authority,"Harare") ~ "Harare",
+    TRUE ~ "NA"
+  )) %>% 
+  mutate(area=case_when(
+    str_detect(file_name,"BYOMetro") ~ "Bulawayo and Harare",
+    str_detect(file_name,"HREMetro") ~ "Bulawayo and Harare",
+    str_detect(file_name,"Midlands") ~ "Midlands",
+    str_detect(file_name,"Masvingo") ~ "Masvingo",
+    str_detect(file_name,"MatSouth") ~ "Matebeleland",
+    str_detect(file_name,"MatNorth") ~ "Matebeleland",
+    str_detect(file_name,"MashWest") ~ "Mashonaland",
+    str_detect(file_name,"MashEast") ~ "Mashonaland",
+    str_detect(file_name,"MashCentral") ~ "Mashonaland",
+    str_detect(file_name,"Manicaland") ~ "Manicaland",
+    TRUE ~ "Other"
+  )) %>% 
+  mutate(province=case_when(
+    str_detect(file_name,"BYOMetro") ~ "Bulawayo",
+    str_detect(file_name,"HREMetro") ~ "Harare",
+    str_detect(file_name,"Midlands") ~ "Midlands",
+    str_detect(file_name,"Masvingo") ~ "Masvingo",
+    str_detect(file_name,"MatSouth") ~ "Matebeleland South",
+    str_detect(file_name,"MatNorth") ~ "Matebeleland North",
+    str_detect(file_name,"MashWest") ~ "Mashonaland West",
+    str_detect(file_name,"MashEast") ~ "Mashonaland East",
+    str_detect(file_name,"MashCentral") ~ "Mashonaland Central",
+    str_detect(file_name,"Manicaland") ~ "Manicaland",
+    TRUE ~ "Other"
+  )) %>% 
+  mutate(labels=case_when(
+    str_detect(local_authority,"Bulawayo") ~ local_authority,
+    str_detect(local_authority,"Harare") ~ local_authority,
+    str_detect(local_authority,"Mutare") ~ local_authority,
+    str_detect(local_authority,"Bindura") ~ local_authority,
+    str_detect(local_authority,"Chinhoyi") ~ local_authority,
+    str_detect(local_authority,"Kadoma") ~ local_authority,
+    str_detect(local_authority,"Masvingo") ~ local_authority,
+    str_detect(local_authority,"Lupane") ~ local_authority,
+    str_detect(local_authority,"Gwanda") ~ local_authority,
+    str_detect(local_authority,"Gweru") ~ local_authority,
+    TRUE ~ NA_character_
+  ))
+
+clean_data
+```
+```{r}
+nrow(clean_data)
+length(clean_data$local_authority)
+```
+
+
+```{r fig.height=6, fig.width=8}
+plot1<-
+  clean_data %>% 
+  ggplot(aes(
+    x=vote_percent_difference,
+    y=fct_reorder(province,total_votes,sum),
+    size=total_votes,
+    color=fct_rev(fct_reorder(council_type,total_votes,sum)),
+    label=labels
+    )) +
+  geom_jitter(width = 0,height = 0.05)  +
+  scale_x_continuous(position = "top",labels = scales::percent,breaks = seq(-0.5,0.75,0.25)) +
+  geom_vline(xintercept = 0,color="red") +
+  ylab("Provinces\n") +
+  xlab("Voting percentage differenece between\n Nelson Chamisa (<-) and (->) Emmerson Mnangagwa \n") +
+  theme(axis.title = element_text(size=10)) +
+  scale_size_continuous(name = "Total votes") +
+  scale_color_discrete(name = "Administrative\nCouncil Type") +
+  #labs(
+  #  title = "Breakdown of Zimbabwe Election results by local authority\n"
+  #  ) +
+  theme(plot.title = element_text(hjust = +2.5)) +
+  facet_grid(area~.,drop=T,switch = "y",scales = "free") +
+  #facet_wrap(~area, strip.position = "left", scales = "free",drop = T) +
+  theme(panel.spacing = unit(0, "lines"), 
+         strip.background = element_blank(),
+         strip.placement = "outside",
+        strip.text.y=element_blank()) #+
+  #geom_text_repel(
+  #  size = 2,
+  #  color="black",
+  #  force = 1,
+  #  na.rm = T,
+  #  segment.color = "black",
+  #  #segment.size = 1,
+  #  #segment.alpha=1,
+  #  min.segment.length = 0.0001)# +
+   #geom_point_interactive(aes(tooltip = local_authority), size = 2) 
+  
+  #geom_label()
+
+plot1
+```
+
+```{r}
+plot2<-
+  clean_data %>% 
+  group_by(area) %>% 
+  summarise(total_votes=sum(total_votes,na.rm=T)) %>% 
+  ggplot(aes(
+    x=1,
+    y=fct_reorder(area,total_votes,sum),
+    size=total_votes
+    )) +
+  geom_point()
+
+plot2
+```
+
+```{r}
+clean_data %>% 
+  group_by(local_authority) %>% 
+  summarise(total_votes=sum(total_votes,na.rm = T)) %>% 
+  arrange(desc(total_votes))
+```
+
+```{r fig.height=7, fig.width=8}
+plot1 +
+  theme_economist(horizontal = F) +
+  theme(panel.spacing = unit(0, "lines"), 
+         strip.background = element_blank(),
+         strip.placement = "outside",
+        strip.text.y=element_blank()) +
+  theme(legend.position="right") +
+  theme(legend.text = element_text(size = 9)) +
+  scale_color_economist(name = "Administrative \nCouncil Type") +
+  theme(axis.text.x.top = element_text(angle = 0, vjust = 3,size=9)) +
+  theme(axis.line.x.top = element_blank()) +
+  theme(axis.ticks.x.top = element_blank()) +
+  scale_size_continuous(labels = function(x){x/1000},name = "Votes cast\n('000)") +
+  theme(axis.text.y = element_text(angle = 0,size=9,hjust = 1)) +
+  theme(axis.title.x.top = element_text(angle = 0,size=9,hjust =0.43,face = "bold")) +
+  theme(axis.title.y = element_text(angle = 90,size=10,face = "bold")) +
+  theme(legend.title = element_text(size = 11,face = "bold")) +
+  #xlab("") +
+  labs(
+    title="Poles apart",
+    subtitle="Zimbabwe 2018 presidential election results by local authority\n",
+    caption="Source: Zimbabwe Electoral Commission; The Economist"
+       ) +
+  guides(color=guide_legend(
+                 keywidth=0.1,
+                 keyheight=0.4,
+                 default.unit="inch")
+      ) +
+  theme(
+    plot.title = element_text(hjust = -0.35),
+    plot.subtitle = element_text(hjust = -1.3),
+    plot.caption = element_text(hjust = 1.5)
+    )
+  #guide_colorbar(title.position="top")
+```
+
+```{r}
+votes_cast<-
+  raw_data %>% 
+  ungroup() %>%
+  select(-skips) %>% 
+  mutate(council_type=str_remove_all(council_type,"\n"))  %>% 
+  mutate(file_name=str_remove(file_name,"Raw_data//")) %>% 
+  mutate(file_name=str_remove(file_name,".xlsx")) %>% 
+  mutate(province=case_when(
+    str_detect(file_name,"BYOMetro") ~ "Bulawayo",
+    str_detect(file_name,"HREMetro") ~ "Harare",
+    str_detect(file_name,"Midlands") ~ "Midlands",
+    str_detect(file_name,"Masvingo") ~ "Masvingo",
+    str_detect(file_name,"MatSouth") ~ "Matebeleland South",
+    str_detect(file_name,"MatNorth") ~ "Matebeleland North",
+    str_detect(file_name,"MashWest") ~ "Mashonaland West",
+    str_detect(file_name,"MashEast") ~ "Mashonaland East",
+    str_detect(file_name,"MashCentral") ~ "Mashonaland Central",
+    str_detect(file_name,"Manicaland") ~ "Manicaland",
+    TRUE ~ "Other"
+  )) %>% select(-file_name)
+
+votes_cast
+```
+
+```{r}
+write_csv(votes_cast,"clean_data/votes_cast.csv")
+```
+
